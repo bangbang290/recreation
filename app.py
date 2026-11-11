@@ -21,6 +21,13 @@ else:
     st.caption('진행요원 전용 · 이 창은 노트북에 두세요.')
 if operator:
     html = html.replace('<body>', '<body class="operator">', 1)
+if not operator:
+    st.markdown('''<style>
+    [data-testid="stMainBlockContainer"]{padding-top:0.5rem!important;padding-bottom:0!important}
+    [data-testid="stVerticalBlock"]{gap:0.5rem}
+    [data-testid="stElementContainer"]:has(iframe[data-testid="stIFrame"]){height:calc(100dvh - 86px)!important;min-height:0!important}
+    iframe[data-testid="stIFrame"]{height:calc(100dvh - 86px)!important;}
+    </style>''', unsafe_allow_html=True)
 config = json.dumps({'streamlit': True, 'channel': channel})
 html = html.replace('<script>', '<script>const APP_CONFIG=' + config + ';\n', 1)
-components.html(html, height=1100, scrolling=True)
+components.html(html, height=1100 if operator else 700, scrolling=True)
