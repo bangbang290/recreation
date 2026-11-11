@@ -28,6 +28,6 @@ if not operator:
     [data-testid="stElementContainer"]:has(iframe[data-testid="stIFrame"]){height:calc(100dvh - 86px)!important;min-height:0!important}
     iframe[data-testid="stIFrame"]{height:calc(100dvh - 86px)!important;}
     </style>''', unsafe_allow_html=True)
-config = json.dumps({'streamlit': True, 'channel': channel, 'build': 15})
+config = json.dumps({'streamlit': True, 'channel': channel, 'build': 16})
 html = html.replace('<script>', '<script>const APP_CONFIG=' + config + ';\n', 1)
 components.html(html, height=1100 if operator else 700, scrolling=True)
