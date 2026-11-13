@@ -339,7 +339,7 @@ input::placeholder,textarea::placeholder{color:#8ba1bd}
 <div class="row"><div><label for="lateParticipant">추가 참가자 · 인원이 적은 분임에 자동 배치</label><input id="lateParticipant" maxlength="30"></div><button id="addParticipant">1명 추가</button></div>
 </details>
 <details class="roster-editors"><summary>팀명·구호 입력 / 분임별 확인</summary><div id="teamEditors" class="team-editors"></div><div class="actions"><button id="saveTeams" class="primary">팀명·구호·명단 저장</button></div><p id="teamStatus" role="status"></p></details></details>
-<details class="control-box workshop-panel"><summary>02 · 최종 우승팀 발표</summary><p>점수는 수기로 집계한 뒤 최종 우승팀을 선택해주세요. 발표 버튼을 누르면 직원 화면에 팀명과 구호가 크게 나옵니다.</p><label for="winnerSelect">최종 우승팀</label><select id="winnerSelect"></select><div class="actions"><button id="announceWinner" class="primary">★ 최종 우승 발표</button></div><p id="winnerStatus" role="status"></p>
+<details class="control-box workshop-panel"><summary>02 · 최종 우승팀 발표</summary><p>점수는 수기로 집계한 뒤 최종 우승팀을 선택해주세요. 발표 버튼을 누르면 직원 화면에 팀명과 구호가 크게 나옵니다.</p><label for="winnerSelect">최종 우승팀</label><select id="winnerSelect"></select><div class="actions"><button id="announceWinner" class="primary">★ 최종 우승 발표</button><button id="resendWinner" disabled>우승 화면 다시 보내기</button></div><p id="winnerStatus" role="status"></p>
 <section class="winner-music" aria-labelledby="winnerMusicTitle">
 <h3 id="winnerMusicTitle">♫ 우승 발표 음악</h3>
 <p><strong>Don Toliver — Lose My Mind (feat. Doja Cat)</strong><br><span class="help">F1® The Movie · 00:52부터 시작</span></p>
@@ -360,6 +360,7 @@ const $=id=>document.getElementById(id),KEY='retro-workshop-five-v1',OLDKEY='ret
 const HOST=document.body.classList.contains('operator');
 const MARKUP='<!doctype html>'+document.documentElement.outerHTML;
 let hostWindow=null,saveOK=true;
+let pendingWinnerDisplay=null;
 const GAME_ORDER=['initial','music','unity','quote','drawing'];
 const NAMES={home:'게임 선택',initial:'카테고리 초성게임',music:'음악퀴즈',unity:'일심동체',quote:'명대사 퀴즈',drawing:'그림 이어그리기',teams:'분임 소개',winner:'최종 우승 발표'};
 const MUSIC_CATEGORIES=[{"id":"one80","group":"1초 듣고 맞히기","title":"1980년대","caption":"1980~1989","icon":"01 SEC","tone":"gold","url":"https://www.youtube.com/watch?v=oteHAZM1Um8"},{"id":"one90","group":"1초 듣고 맞히기","title":"1990년대","caption":"1990~1999","icon":"01 SEC","tone":"gold","url":"https://www.youtube.com/watch?v=ms9ra3LZiSU"},{"id":"one00","group":"1초 듣고 맞히기","title":"2000년대","caption":"2000~2009","icon":"01 SEC","tone":"gold","url":"https://www.youtube.com/watch?v=0U9lrhLX3-Y"},{"id":"one10","group":"1초 듣고 맞히기","title":"2010년대","caption":"2010~2019","icon":"01 SEC","tone":"gold","url":"https://www.youtube.com/watch?v=O6sYn9nEUxk"},{"id":"lyrics00","group":"가사만 듣고 맞히기","title":"2000년대","caption":"2000~2009 · 가사 듣기","icon":"LYRICS","tone":"rose","url":"https://www.youtube.com/watch?v=FnmCsfjuEJI"},{"id":"lyrics05","group":"가사만 듣고 맞히기","title":"2010년대","caption":"2010~2019 · 가사 듣기","icon":"LYRICS","tone":"rose","url":"https://www.youtube.com/watch?v=Q1h4WPTmMEo"},{"id":"movie","group":"OST 맞히기","title":"영화 OST","caption":"음악 속 영화를 떠올려보세요","icon":"MOVIE","tone":"green","url":"https://www.youtube.com/watch?v=o4jxhuss2Ig"},{"id":"drama","group":"OST 맞히기","title":"드라마 OST","caption":"음악 속 드라마를 떠올려보세요","icon":"DRAMA","tone":"green","url":"https://www.youtube.com/watch?v=Ld2xM9LHVgI"}];
@@ -405,9 +406,33 @@ if(state.revision!==2){state.seconds=5;state.revision=2;}
 // Reload never projects a previously revealed answer or an expired clock.
 state.reveal=false;state.showPrompt=false;state.deadline=0;state.left=0;state.timerType='';musicSettings().menu=true;unitySettings().menu=true;state.initialRound=defaultInitialRound();if(!validInitialTimes(state.initialTimes))state.initialTimes=[];state.initialMenu=true;state.drawingDone=false;state.player=1;
 function persist(){try{localStorage.setItem(KEY,JSON.stringify(state));saveOK=true}catch{saveOK=false}}
-function publish(){persist();render();if(syncChannel)syncChannel.postMessage({type:"state",state});const msg={type:'arcade-state',state};if(HOST&&window.opener)window.opener.postMessage(msg,'*');else if(hostWindow&&!hostWindow.closed)hostWindow.postMessage(msg,'*')}
+function stateEnvelope(type){return {type,state,role:HOST?'operator':'audience',displayRequest:HOST&&state.game==='winner'&&pendingWinnerDisplay?{id:pendingWinnerDisplay.id,team:pendingWinnerDisplay.team}:null};}
+function sendState(){
+  if(syncChannel)syncChannel.postMessage(stateEnvelope('state'));
+  const msg=stateEnvelope('arcade-state');
+  if(HOST&&window.opener)window.opener.postMessage(msg,'*');else if(hostWindow&&!hostWindow.closed)hostWindow.postMessage(msg,'*');
+}
+function publish(){persist();render();sendState();}
+function receiveState(message,reply){
+  if(!valid(message.state))return false;
+  state=message.state;normalizeMeeting();persist();render();
+  const request=message.displayRequest;
+  if(!HOST&&request&&typeof request.id==='string'&&request.id.length<=100&&Number.isInteger(request.team)&&state.game==='winner'&&state.winnerTeam===request.team&&!$('winnerView').classList.contains('hidden')){
+    reply({type:'winner-displayed',role:'audience',id:request.id,team:request.team});
+  }
+  return true;
+}
+function confirmWinnerDisplay(message){
+  if(!HOST||!pendingWinnerDisplay||message.role!=='audience'||message.id!==pendingWinnerDisplay.id||message.team!==pendingWinnerDisplay.team||state.game!=='winner'||state.winnerTeam!==message.team)return;
+  pendingWinnerDisplay=null;setText('winnerStatus','✓ 직원 화면 표시 확인 · '+teamLabel(message.team)+' 우승 발표 완료');
+}
+function requestWinnerDisplay(){
+  if(!HOST||state.game!=='winner'||state.winnerTeam<0)return;
+  pendingWinnerDisplay={id:Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),team:state.winnerTeam,started:Date.now(),lastSent:Date.now(),attempts:1};
+  setText('winnerStatus','우승 화면을 보내고 있습니다. 직원 화면 표시를 확인하는 중…');
+}
 function clearStage(){stopClockAudio();state.initialRound=defaultInitialRound();state.drawingDone=false;state.categoryIntro=false;state.reveal=false;state.showPrompt=false;state.example=false;state.deadline=0;state.left=0;state.timerType='';state.player=1}
-function chooseGame(g){if(!Object.hasOwn(NAMES,g))return;state.game=g;if(g==='music')musicSettings().menu=true;if(g==='unity')unitySettings().menu=true;state.initialMenu=g==='initial';state.pool='main';clearStage();normalize();publish()}
+function chooseGame(g){if(!Object.hasOwn(NAMES,g))return;if(g!=='winner'){pendingWinnerDisplay=null;setText('winnerStatus','');}state.game=g;if(g==='music')musicSettings().menu=true;if(g==='unity')unitySettings().menu=true;state.initialMenu=g==='initial';state.pool='main';clearStage();normalize();publish()}
 function ids(){const g=state.game;if(!LENGTHS[g])return [];if(g==='unity'){const u=unitySettings();return u.menu?[]:state.orders.unity.filter(id=>UNITY_PACKS[u.group].ids.includes(id));}return state.orders[g].filter(i=>{const x=DATA[g]?.[i];if(g==='initial'&&state.category!=='전체'&&x.category!==state.category)return false;if(['initial','drawing'].includes(g)&&state.pool!=='all'&&x.reserve!==(state.pool==='reserve'))return false;return true})}
 function normalize(){const list=ids();if(list.length&&!list.includes(state.index[state.game]))state.index[state.game]=list[0]}
 function currentText(){const g=state.game,id=state.index[g];if(state.example&&g==='unity')return '하트';if(state.example&&g==='drawing')return '누워서 떡먹기';if(!ids().length)return '';return state.edits[g+':'+id]||(g==='quote'?DATA.quotes[id]:DATA[g][id].text)}
@@ -448,7 +473,13 @@ setText('visibility',g==='drawing'?(state.showPrompt?'주의: 제시어가 직�
 renderUnity();renderMusic();renderTimedGames();renderWorkshop();ytRender();audioTransitions();renderTeams();renderRosterImport();renderClock();setText('liveStatus',saveOK?'브라우저 저장됨 · 행사 전후 백업을 다운로드하세요.':'자동 저장 불가 · 백업 다운로드로 저장하세요.');}
 
 // The operator and audience windows synchronize within this browser session.
-window.addEventListener('message',e=>{if(HOST&&window.opener&&e.source===window.opener&&e.data?.type==='arcade-state'&&valid(e.data.state)){state=e.data.state;normalizeMeeting();persist();render()}else if(!HOST&&hostWindow&&e.source===hostWindow){if(e.data?.type==='arcade-ready')hostWindow.postMessage({type:'arcade-state',state},'*');if(e.data?.type==='arcade-state'&&valid(e.data.state)){state=e.data.state;normalizeMeeting();persist();render()}}});
+window.addEventListener('message',e=>{
+  const trusted=HOST?window.opener&&e.source===window.opener:hostWindow&&e.source===hostWindow;
+  if(!trusted)return;
+  if(e.data?.type==='winner-displayed')confirmWinnerDisplay(e.data);
+  if(!HOST&&e.data?.type==='arcade-ready')hostWindow.postMessage(stateEnvelope('arcade-state'),'*');
+  if(e.data?.type==='arcade-state')receiveState(e.data,msg=>e.source.postMessage(msg,'*'));
+});
 $('openHost').onclick=()=>{if(hostWindow&&!hostWindow.closed){hostWindow.focus();return;}const url=URL.createObjectURL(new Blob([MARKUP.replace('<body>','<body class="operator">')],{type:'text/html;charset=utf-8'}));hostWindow=window.open(url,'retro-workshop-operator','width=1150,height=900');if(!hostWindow)alert('팝업을 허용해주세요.');};
 Object.entries(NAMES).forEach(([v,n])=>{const o=document.createElement('option');o.value=v;o.textContent=n;$('gameSelect').append(o)});
 ['전체',...new Set(DATA.initial.map(x=>x.category))].forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;$('category').append(o)});
@@ -656,9 +687,54 @@ $('winnerMusicPlay').onclick=startWinnerMusic;$('winnerMusicStop').onclick=()=>s
 $('winnerMusicExternal').onclick=()=>stopWinnerMusic('유튜브 창으로 전환합니다. 외부 창에서 재생한 음악은 그 창에서 정지해주세요.');
 $('winnerMusicAuto').onchange=()=>{winnerAudioConfig().enabled=$('winnerMusicAuto').checked;publish();};
 $('winnerMusicVolume').oninput=()=>{winnerAudioConfig().volume=Number($('winnerMusicVolume').value);publish();};
-let channelConnected=false;
+let channelConnected=false,lastPeerSeen=0;
 function connectionText(s){const e=document.getElementById('connectionStatus');if(e)e.textContent=s;}
-function setupChannel(token){try{if(!window.BroadcastChannel){connectionText('화면 연결 미지원 · 같은 브라우저에서 실행해주세요.');return false;}if(syncChannel)syncChannel.close();syncChannel=new window.BroadcastChannel('retro-session-'+token);syncChannel.onmessage=e=>{if(e.data?.type==='ready'&&!HOST){channelConnected=true;connectionText('진행요원 창 연결됨');syncChannel.postMessage({type:'state',state});}else if(e.data?.type==='state'&&valid(e.data.state)&&(!e.data.state.yt||validYT(e.data.state.yt))){channelConnected=true;connectionText(HOST?'직원용 화면 연결됨':'진행요원 창 연결됨');state=e.data.state;normalizeMeeting();persist();render();}};connectionText(HOST?'직원용 화면 연결 대기 중…':'상단 버튼으로 진행요원 창을 열어주세요.');if(HOST){syncChannel.postMessage({type:'ready'});setInterval(()=>{if(syncChannel&&!channelConnected)syncChannel.postMessage({type:'ready'});},1500);}return true;}catch{syncChannel=null;connectionText('두 화면을 연결하지 못했습니다. 같은 브라우저의 일반 창에서 열어주세요.');return false;}}
+function sessionChannel(token){
+  // Streamlit can recreate its Python session on refresh. Both browser windows
+  // already share one workshop state, so retain its channel in the same storage.
+  const validToken=s=>typeof s==='string'&&/^[a-zA-Z0-9-]{1,80}$/.test(s);
+  try{
+    const saved=localStorage.getItem(KEY+'-channel');
+    if(validToken(saved))return saved;
+    if(validToken(token))localStorage.setItem(KEY+'-channel',token);
+  }catch{}
+  return validToken(token)?token:null;
+}
+function markPeerSeen(){lastPeerSeen=Date.now();channelConnected=true;connectionText(HOST?'직원용 화면 연결됨':'진행요원 창 연결됨');}
+function tickChannel(){
+  if(syncChannel){
+    if(channelConnected&&Date.now()-lastPeerSeen>6000){channelConnected=false;connectionText(HOST?'직원용 화면 응답 없음 · 직원 화면을 열어주세요.':'진행요원 창 응답 없음 · 상단 버튼으로 다시 열어주세요.');}
+    syncChannel.postMessage({type:'ping',role:HOST?'operator':'audience'});
+    if(!channelConnected)syncChannel.postMessage({type:HOST?'ready':'request-state',role:HOST?'operator':'audience'});
+  }
+  if(HOST&&pendingWinnerDisplay){
+    if(state.game!=='winner'||state.winnerTeam!==pendingWinnerDisplay.team){pendingWinnerDisplay=null;return;}
+    const p=pendingWinnerDisplay,now=Date.now();
+    if(now-p.started>=4000)setText('winnerStatus','직원 화면 표시를 아직 확인하지 못했습니다. 직원 화면을 연 뒤 ‘우승 화면 다시 보내기’를 눌러주세요. 계속 안 되면 기존 진행요원 창을 닫고 직원 화면의 상단 버튼으로 다시 여세요.');
+    if(now-p.lastSent>=1500&&p.attempts<6){p.lastSent=now;p.attempts++;sendState();}
+  }
+}
+function setupChannel(token){
+  try{
+    if(!window.BroadcastChannel){connectionText('화면 연결 미지원 · 같은 브라우저에서 실행해주세요.');return false;}
+    token=sessionChannel(token);if(!token)return false;
+    if(syncChannel)syncChannel.close();channelConnected=false;lastPeerSeen=0;
+    syncChannel=new window.BroadcastChannel('retro-session-'+token);
+    syncChannel.onmessage=e=>{
+      const m=e.data;if(!m||m.role===(HOST?'operator':'audience'))return;
+      if(m.type==='ready'&&!HOST){markPeerSeen();syncChannel.postMessage(stateEnvelope('state'));}
+      else if(m.type==='request-state'&&HOST){markPeerSeen();syncChannel.postMessage(stateEnvelope('state'));}
+      else if(m.type==='ping'){markPeerSeen();syncChannel.postMessage({type:'pong',role:HOST?'operator':'audience'});}
+      else if(m.type==='pong')markPeerSeen();
+      else if(m.type==='winner-displayed'){markPeerSeen();confirmWinnerDisplay(m);}
+      else if(m.type==='state'&&receiveState(m,reply=>syncChannel.postMessage(reply)))markPeerSeen();
+    };
+    connectionText(HOST?'직원용 화면 연결 대기 중…':'상단 버튼으로 진행요원 창을 열어주세요.');
+    syncChannel.postMessage({type:HOST?'ready':'request-state',role:HOST?'operator':'audience'});
+    return true;
+  }catch{syncChannel=null;connectionText('두 화면을 연결하지 못했습니다. 같은 브라우저의 일반 창에서 열어주세요.');return false;}
+}
+setInterval(tickChannel,1500);
 if(typeof APP_CONFIG!=='undefined'&&APP_CONFIG.streamlit){document.body.classList.add('embedded');show('openHost',false);if(APP_CONFIG.channel)setupChannel(APP_CONFIG.channel);else connectionText('메인 화면의 진행요원 창 열기 버튼으로 다시 열어주세요.');}
 if(HOST){document.title='진행요원 전용 · 5종 게임';document.querySelector('.brand').textContent='진행요원 전용 · 5종 게임';if(window.opener)window.opener.postMessage({type:'arcade-ready'},'*')}
 let motionOff=false;
@@ -927,6 +1003,7 @@ function renderWorkshop(){
   const roster=state.game==='teams',winner=state.game==='winner';
   document.body.classList.toggle('roster-mode',roster);document.body.classList.toggle('winner-mode',winner);
   show('rosterView',roster);show('winnerView',winner);show('showTeams',state.game==='home');
+  $('resendWinner').disabled=!winner||state.winnerTeam<0;
   if(roster){
     setText('screenTag','우리들의 일곱 분임');setText('screenNote','');setText('progress','');show('activeTeam',false);
     $('rosterView').replaceChildren();
@@ -941,13 +1018,14 @@ function renderWorkshop(){
     const selected=state.winnerTeam>=0,t=state.teams[state.winnerTeam];show('activeTeam',false);setText('screenTag','WORKSHOP CHAMPION');setText('screenNote','');setText('progress','');
     setText('winnerName',selected?t.name:'우승팀 발표 준비 중');setText('winnerGroup',selected?`${state.winnerTeam+1}분임 · 최종 우승`:'진행요원이 우승팀을 선택해주세요.');
     setText('winnerSlogan',selected?t.slogan:'');setText('winnerCongrats',selected?'함께해서 더 즐거웠습니다. 축하합니다!':'');
+    setText('hostAnswer',selected?teamLabel(state.winnerTeam):'우승팀 선택 대기');setText('hostDetails',selected?(t.slogan||'등록된 구호 없음'):'상단에서 우승팀을 선택해주세요.');
   }
   renderGameCamera();
 }
 function announceWinner(){
   const raw=$('winnerSelect').value,n=Number(raw);
   if(raw===''||!Number.isInteger(n)||n<0||n>=7){setText('winnerStatus','먼저 최종 우승팀을 선택해주세요.');return;}
-  state.winnerTeam=n;chooseGame('winner');setText('winnerStatus',teamLabel(n)+' 우승을 직원용 화면에 발표했습니다.');
+  state.winnerTeam=n;state.game='winner';requestWinnerDisplay();chooseGame('winner');
   if(winnerAudioConfig().enabled)startWinnerMusic();else if(ytMode==='winner')stopWinnerMusic();
 }
 Array.from({length:7},(_,i)=>{
@@ -962,6 +1040,7 @@ Array.from({length:7},(_,i)=>{
 $('participantInput').oninput=()=>{participantInputDirty=true;};
 $('assignTeams').onclick=assignSeven;$('saveTeams').onclick=saveTeamDetails;$('addParticipant').onclick=addParticipant;
 $('showTeams').onclick=$('hostShowTeams').onclick=()=>chooseGame('teams');$('announceWinner').onclick=announceWinner;
+$('resendWinner').onclick=()=>{if(!HOST||state.game!=='winner'||state.winnerTeam<0)return;requestWinnerDisplay();sendState();};
 
 let cameraStream=null,cameraBusy=false,cameraRequest=0,cameraRotation=0,cameraMirrored=false,cameraGame='';
 function cameraActive(){return !HOST&&state.game==='drawing';}
